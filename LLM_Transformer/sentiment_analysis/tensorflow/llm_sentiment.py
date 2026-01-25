@@ -167,34 +167,70 @@ def build_LLM_Sentiment():
 
 
 # Subclass
-class TokenAndPositionEmbedding(keras.layers.Layer):
 
-    def __init__(self):
+class TransformerBlock(keras.layers.Layer):
+    def __init__(self, embed_dim, num_heads, ff_dim, rate=0.1):
+
         super().__init__()
 
-        self.tok_and_pos = keras_hub.layers.TokenAndPositionEmbedding(
-                               vocabulary_size=tokenizer.vocabulary_size(),
-                               sequence_length=SEQ_LENGTH,
-                               embedding_dim=MODEL_DIM
-                           )
+        self.att = layers.MultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
+        self.ffn = keras.Sequential([layers.Dense(ff_dim, activation="relu"), layers.Dense(embed_dim),])
+        self.ln1 = layers.LayerNormalization(epsilon=1e-6)
+        self.ln2 = layers.LayerNormalization(epsilon=1e-6)
+
+        self.drp1 = layers.Dropout(rate)
+        self.drp2 = layers.Dropout(rate)
 
     def call(self, x):
 
-        x = self.tok_and_pos(x)
-        return x
-        
+        att_x = self.att(x, x)
+        att_x = self.drp1(att_x)
+        x1    = self.ln1(x + att_x)
+        x2    = self.ffn(x1)
+        x2    = self.drp2(x2)
+        out   = self.ln2(x1 + x2)
 
+        return out
+
+
+class TokenAndPositionEmbedding(keras.layers.Layer):
+    def __init__(self, vocab_size, seq_len, embed_dim):
+
+        super().__init__()
+
+        self.token_emb = layers.Embedding(input_dim=vocab_size, output_dim=embed_dim)
+        self.pos_emb   = layers.Embedding(input_dim=seq_len, output_dim=embed_dim)
+
+    def call(self, x):
+
+        seq_len = ops.shape(x)[-1]
+        pos     = ops.arange(start=0, stop=seq_len, step=1)
+        pos_emb = self.pos_emb(pos)
+        tok_emb = self.token_emb(x)
+        out = tok_emb + pos_emb
+
+        return out
+    
+    
 class LLM_Text(keras.Model):
 
     def __init__(self):
         super().__init__()
 
-        self.tok_and_pos = TokenAndPositionEmbedding()
+        # from library
+        #self.tok_and_pos = keras_hub.layers.TokenAndPositionEmbedding(vocabulary_size=tokenizer.vocabulary_size(), sequence_length=SEQ_LENGTH, embedding_dim=MODEL_DIM)
 
+        # from local
+        self.tok_and_pos = TokenAndPositionEmbedding(tokenizer.vocabulary_size(), SEQ_LENGTH, MODEL_DIM)
+        
         self.ln  = keras.layers.LayerNormalization(epsilon=NORM_EPSILON)
         self.drp = keras.layers.Dropout(rate=DROPOUT)
 
-        self.trs_enc = [keras_hub.layers.TransformerEncoder(intermediate_dim=INTERMEDIATE_DIM, num_heads=NUM_HEADS, dropout=DROPOUT, layer_norm_epsilon=NORM_EPSILON) for _ in range(NUM_LAYERS)]
+        # from library
+        #self.trs_enc = [keras_hub.layers.TransformerEncoder(intermediate_dim=INTERMEDIATE_DIM, num_heads=NUM_HEADS, dropout=DROPOUT, layer_norm_epsilon=NORM_EPSILON) for _ in range(NUM_LAYERS)]
+
+        # from local
+        self.trs_enc = [TransformerBlock(MODEL_DIM, NUM_HEADS, INTERMEDIATE_DIM) for _ in range(NUM_LAYERS)]
 
         
     def call(self, x):
