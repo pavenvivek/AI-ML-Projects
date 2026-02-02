@@ -129,8 +129,6 @@ vald_data = (
 
 # model construction
 
-# from scratch
-
 # Functional
 def build_LLM_Sentiment():
 
@@ -168,6 +166,114 @@ def build_LLM_Sentiment():
 
 # Subclass
 
+# from scratch
+class TokenAndPositionEmbedding(keras.layers.Layer):
+    def __init__(self, vocab_size, seq_len, embed_dim):
+
+        super().__init__()
+
+        self.token_emb = layers.Embedding(input_dim=vocab_size, output_dim=embed_dim)
+        self.pos_emb   = layers.Embedding(input_dim=seq_len, output_dim=embed_dim)
+
+    def call(self, x):
+
+        seq_len = x.shape[-1] #ops.shape(x)[-1]
+        pos     = ops.arange(start=0, stop=seq_len, step=1)
+        pos_emb = self.pos_emb(pos)
+        tok_emb = self.token_emb(x)
+        out     = tok_emb + pos_emb
+
+        return out
+
+
+# building multiheadattention from scratch 
+class MultiHeadAttention(tf.keras.layers.Layer):
+    def __init__(self, d_model, num_heads):
+
+        super().__init__()
+
+        self.num_heads = num_heads
+        self.d_model = d_model
+
+        assert d_model % num_heads == 0
+
+        self.depth = d_model // num_heads
+
+        self.wq = layers.Dense(d_model)
+        self.wk = layers.Dense(d_model)
+        self.wv = layers.Dense(d_model)
+
+        self.dense = layers.Dense(d_model)
+
+    def split_heads(self, x, batch_size):
+        
+        x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
+
+        return tf.transpose(x, perm=[0, 2, 1, 3])
+
+    def scaled_dot_product_attention(self, q, k, v, mask):
+
+        matmul_qk     = tf.matmul(q, k, transpose_b=True)
+        dk            = tf.cast(tf.shape(k)[-1], tf.float32)
+        scaled_logits = matmul_qk / tf.math.sqrt(dk)
+
+        if mask is not None:
+            scaled_logits += (mask * -1e9)
+
+        attention_weights = tf.nn.softmax(scaled_logits, axis=-1)
+        output            = tf.matmul(attention_weights, v)
+
+        return output, attention_weights
+
+    def call(self, v, k, q, mask=None):
+
+        batch_size = tf.shape(q)[0]
+
+        q = self.wq(q)
+        k = self.wk(k)
+        v = self.wv(v)
+
+        q = self.split_heads(q, batch_size)
+        k = self.split_heads(k, batch_size)
+        v = self.split_heads(v, batch_size)
+
+        scaled_attention, attention_weights = self.scaled_dot_product_attention(q, k, v, mask)
+
+        scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])
+        concat_attention = tf.reshape(scaled_attention, (batch_size, -1, self.d_model))
+
+        output = self.dense(concat_attention)
+
+        return output
+
+
+class TransformerBlock_Sc(tf.keras.layers.Layer):
+    def __init__(self, d_model, num_heads, dff, dropout_rate=0.1):
+
+        super().__init__()
+
+        self.att  = MultiHeadAttention(d_model, num_heads)
+        self.ffn  = keras.Sequential([layers.Dense(dff, activation="relu"), layers.Dense(d_model),])
+        self.ln1  = layers.LayerNormalization(epsilon=1e-6)
+        self.ln2  = layers.LayerNormalization(epsilon=1e-6)
+
+        self.drp1 = layers.Dropout(dropout_rate)
+        self.drp2 = layers.Dropout(dropout_rate)
+
+    def call(self, x, training=False, mask=None):
+
+        attn_out = self.att(x, x, x, mask=mask)
+        attn_out = self.drp1(attn_out, training=training)
+        out1     = self.ln1(x + attn_out)
+
+        ffn_out = self.ffn(out1)
+        ffn_out = self.drp2(ffn_out, training=training)
+        out2    = self.ln2(out1 + ffn_out)
+
+        return out2
+
+
+# using keras implenmentaion of multiheadattention
 class TransformerBlock(keras.layers.Layer):
     def __init__(self, embed_dim, num_heads, ff_dim, rate=0.1):
 
@@ -183,34 +289,16 @@ class TransformerBlock(keras.layers.Layer):
 
     def call(self, x):
 
-        att_x = self.att(x, x)
-        att_x = self.drp1(att_x)
-        x1    = self.ln1(x + att_x)
-        x2    = self.ffn(x1)
-        x2    = self.drp2(x2)
-        out   = self.ln2(x1 + x2)
+        att_out = self.att(x, x)
+        att_out = self.drp1(att_out)
+        out1    = self.ln1(x + att_out)
 
-        return out
+        ffn_out = self.ffn(out1)
+        ffn_out = self.drp2(ffn_out)
+        out2    = self.ln2(out1 + ffn_out)
 
+        return out2
 
-class TokenAndPositionEmbedding(keras.layers.Layer):
-    def __init__(self, vocab_size, seq_len, embed_dim):
-
-        super().__init__()
-
-        self.token_emb = layers.Embedding(input_dim=vocab_size, output_dim=embed_dim)
-        self.pos_emb   = layers.Embedding(input_dim=seq_len, output_dim=embed_dim)
-
-    def call(self, x):
-
-        seq_len = ops.shape(x)[-1]
-        pos     = ops.arange(start=0, stop=seq_len, step=1)
-        pos_emb = self.pos_emb(pos)
-        tok_emb = self.token_emb(x)
-        out = tok_emb + pos_emb
-
-        return out
-    
     
 class LLM_Text(keras.Model):
 
@@ -230,7 +318,10 @@ class LLM_Text(keras.Model):
         #self.trs_enc = [keras_hub.layers.TransformerEncoder(intermediate_dim=INTERMEDIATE_DIM, num_heads=NUM_HEADS, dropout=DROPOUT, layer_norm_epsilon=NORM_EPSILON) for _ in range(NUM_LAYERS)]
 
         # from local
-        self.trs_enc = [TransformerBlock(MODEL_DIM, NUM_HEADS, INTERMEDIATE_DIM) for _ in range(NUM_LAYERS)]
+        #self.trs_enc = [TransformerBlock(MODEL_DIM, NUM_HEADS, INTERMEDIATE_DIM) for _ in range(NUM_LAYERS)]
+
+        # from local scratch
+        self.trs_enc = [TransformerBlock_Sc(MODEL_DIM, NUM_HEADS, INTERMEDIATE_DIM) for _ in range(NUM_LAYERS)]
 
         
     def call(self, x):
@@ -259,17 +350,14 @@ class LLM_Text_Classifier(keras.Model):
         x = self.out(x[:,0,:])
 
         return x
-
     
     
 # load from pretrained model
 #encoder_model = keras.models.load_model("./encoder_model.keras") #, compile=True)
-
 #encoder_model.summary()
 
 #enc_out = encoder_model(inputs)
 #output  = layers.Dense(1, activation="sigmoid")(enc_out[:,0,:])
-
 #output  = layers.Dense(1, activation="sigmoid")(x[:,0,:])
 
 
