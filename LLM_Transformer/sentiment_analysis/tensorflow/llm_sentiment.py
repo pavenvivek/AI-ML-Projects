@@ -16,11 +16,8 @@ from keras import layers
 # Parameters
 
 # Preprocessing params.
-PRETRAINING_BATCH_SIZE = 1 #64 #128
-FINETUNING_BATCH_SIZE = 32
+BATCH_SIZE = 32
 SEQ_LENGTH = 128
-MASK_RATE = 0.10 #75
-PREDICTIONS_PER_SEQ = 32
 
 # Model params.
 NUM_LAYERS = 3
@@ -31,10 +28,8 @@ DROPOUT = 0.1
 NORM_EPSILON = 1e-5
 
 # Training params.
-PRETRAINING_LEARNING_RATE = 5e-4
-PRETRAINING_EPOCHS = 2 #8
-FINETUNING_LEARNING_RATE = 5e-5
-FINETUNING_EPOCHS = 3
+LEARNING_RATE = 5e-5
+EPOCHS = 3
 
 
 
@@ -59,10 +54,10 @@ print (f"download path for vocab: {vocab_file}")
 # Load SST-2.
 sst_train_ds = tf.data.experimental.CsvDataset(
     sst_dir + "train.tsv", [tf.string, tf.int32], header=True, field_delim="\t"
-) #.batch(FINETUNING_BATCH_SIZE)
+) #.batch(BATCH_SIZE)
 sst_val_ds = tf.data.experimental.CsvDataset(
     sst_dir + "dev.tsv", [tf.string, tf.int32], header=True, field_delim="\t"
-) #.batch(FINETUNING_BATCH_SIZE)
+) #.batch(BATCH_SIZE)
 
 
 
@@ -109,13 +104,13 @@ def preprocess(sentences, labels):
 train_data = (
     sst_train_ds
     .map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-    .batch(FINETUNING_BATCH_SIZE)
+    .batch(BATCH_SIZE)
     .prefetch(tf.data.AUTOTUNE)
 )
 vald_data = (
     sst_val_ds.
     map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-    .batch(FINETUNING_BATCH_SIZE)
+    .batch(BATCH_SIZE)
     .prefetch(tf.data.AUTOTUNE)
 )
 
@@ -351,52 +346,11 @@ class LLM_Text_Classifier(keras.Model):
 
         return x
     
-    
-# load from pretrained model
-#encoder_model = keras.models.load_model("./encoder_model.keras") #, compile=True)
-#encoder_model.summary()
 
-#enc_out = encoder_model(inputs)
-#output  = layers.Dense(1, activation="sigmoid")(enc_out[:,0,:])
-#output  = layers.Dense(1, activation="sigmoid")(x[:,0,:])
-
-
-'''
-# from keras backbone pre-built and pre-trained
-
-inputs = {
-    "token_ids": keras.Input(shape=(SEQ_LENGTH,), dtype="int32", name="token_ids"),
-    "segment_ids": keras.Input(shape=(SEQ_LENGTH,), dtype="int32", name="segment_ids"),
-    "padding_mask": keras.Input(shape=(SEQ_LENGTH,), dtype="int32", name="padding_mask"),
-}
-
-#backbone = keras_hub.models.Backbone.from_preset("bert_base_en_uncased", num_layers=3) #, hidden_dim=256)
-
-backbone = keras_hub.models.BertBackbone(
-    vocabulary_size=tokenizer.vocabulary_size(),
-    num_layers=NUM_LAYERS,
-    num_heads=NUM_HEADS,
-    hidden_dim=MODEL_DIM,
-    intermediate_dim=INTERMEDIATE_DIM,
-    max_sequence_length=SEQ_LENGTH,
-)
-
-x = backbone(inputs)
-#output  = layers.Dense(1, activation="sigmoid")(x['pooled_output'])
-output  = layers.Dense(1, activation="sigmoid")(x['sequence_output'][:,0,:])
-'''
-#inputs = layers.Input(shape=(SEQ_LENGTH,), dtype="int32")
-
-# Load from local pre-trained model
 model_llm_text = LLM_Text()
-#model_llm_text = keras.models.load_model("./encoder_model.keras") #, compile=True)
-
-#enc_out = model_llm_text(inputs)
-#output  = layers.Dense(1, activation="sigmoid")(enc_out[:,0,:])
-#model = keras.Model(inputs, output, name="finetune")
-
-model = LLM_Text_Classifier(model_llm_text)  #keras.Model(inputs, output, name="finetune")
+model = LLM_Text_Classifier(model_llm_text)
 #model = build_LLM_Sentiment()
+
 
 '''
 dummy_input = train_data.take(1).get_single_element()[0]
@@ -421,15 +375,15 @@ print ("=============")
 # model training and evalution
 
 model.compile(
-    optimizer=keras.optimizers.AdamW(FINETUNING_LEARNING_RATE),
+    optimizer=keras.optimizers.AdamW(LEARNING_RATE),
     loss="binary_crossentropy",
     metrics=["accuracy"]
 )
 
 model.fit(
     train_data,
-    #validation_data=vald_data,
-    epochs=3)
+    validation_data=vald_data,
+    epochs=EPOCHS)
 
 loss, acc = model.evaluate(vald_data)
 
