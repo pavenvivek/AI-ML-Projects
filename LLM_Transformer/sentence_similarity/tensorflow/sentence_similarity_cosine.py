@@ -65,7 +65,7 @@ class BertEncoder(keras.Model):
         self.preprocessor  = keras_hub.models.BertPreprocessor.from_preset("bert_tiny_en_uncased")
         self.backbone      = keras_hub.models.BertBackbone.from_preset("bert_tiny_en_uncased")
         self.pooling_layer = keras.layers.GlobalAveragePooling1D()
-        self.norm_layer    = keras.layers.UnitNormalization(axis=1)
+        self.norm_layer    = keras.layers.UnitNormalization(axis=1) # normalization needed to keep cosine similarity within range (0,1)
         
 
     def call(self, inputs):
