@@ -24,27 +24,28 @@ def preprocess(data):
     s2 = data["sentence2"]
     lbl = [tf.cast(change_range(data["label"]), tf.float32)]
         
-    return ([s1, s2], lbl)
+    #return ([s1, s2], lbl) -> this format (array: [s1, s2]) doesn't split s1, s2 across batch dimension while the following format (tuple (s1, s2)) does
+    return ((s1, s2), lbl)
 
 
-# set drop_remainder=True in batch to handle keras.ops.split in RegressionSiamese below. squeeze is removing
+# set drop_remainder=True in batch if using squeeze in RegressionSiamese below. squeeze is removing
 # all dimensions and sending flat (no array) input to backbone which is throwing error.
 stsb_train = (
     stsb_train
     .map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
     .shuffle(buffer_size=1000)
-    .batch(BATCH_SIZE, drop_remainder=True) 
+    .batch(BATCH_SIZE) #, drop_remainder=True) 
     .prefetch(tf.data.AUTOTUNE)
 )
 stsb_valid = (
     stsb_valid.
     map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
     .shuffle(buffer_size=1000)
-    .batch(BATCH_SIZE, drop_remainder=True)
+    .batch(BATCH_SIZE) #, drop_remainder=True)
     .prefetch(tf.data.AUTOTUNE)
 )
 
-'''
+
 j = 0
 for i in stsb_train:
     print (f"i -> {i}")
@@ -53,17 +54,7 @@ for i in stsb_train:
     if j == 4:
         break
 
-sys.exit(-1)
-'''
-
-
-print("\nInput Samples:")
-for x, y in stsb_train:
-    for i, example in enumerate(x):
-        print(f"sentence 1 : {example[0]} ")
-        print(f"sentence 2 : {example[1]} ")
-        print(f"similarity : {y[i]} \n")
-    break
+#sys.exit(-1)
 
 
 class BertEncoder(keras.Model):
@@ -97,10 +88,12 @@ class RegressionSiamese(keras.Model):
     def call(self, inputs):
 
         #print (f"inputs shape: {inputs.shape}, inputs: {inputs}")
-        sen1, sen2 = keras.ops.split(inputs, 2, axis=1)
+        sen1, sen2 = inputs # keras.ops.split(inputs, 2, axis=1) -> use keras.ops.split if using array format in preprocess
         #print (f"sen1 -> {tf.squeeze(sen1)}, sen2 -> {sen2}")
-        u = self.encoder(tf.squeeze(sen1))
-        v = self.encoder(tf.squeeze(sen2))
+
+        u = self.encoder(sen1) #tf.squeeze(sen1))
+        v = self.encoder(sen2) #tf.squeeze(sen2))
+
         cosine_similarity_scores = keras.ops.matmul(u, keras.ops.transpose(v))
 
         return cosine_similarity_scores
