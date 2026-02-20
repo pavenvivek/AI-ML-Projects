@@ -241,22 +241,25 @@ ner_model.fit(train_dataset, epochs=epochs)
 
 def tokenize_and_convert_to_ids(text):
     tokens = text.split()
+    len_tokens = len(tokens)
     tokens = lowercase_and_convert_to_ids(tokens)
-    return pad_and_trim_batch(tokens)
+    tokens = pad_and_trim_batch(tokens)
 
+    return tokens, len_tokens
+    
 # Sample inference using the trained model
-sample_input = tokenize_and_convert_to_ids(
+sample_input, len_input = tokenize_and_convert_to_ids(
     "eu rejects german call to boycott british lamb and chicken and duck"
 )
-sample_input = ops.reshape(sample_input, newshape=[1, -1])
 
+sample_input = ops.reshape(sample_input, newshape=[1, -1])
 output = ner_model.predict(sample_input)
 prediction = np.argmax(output, axis=-1) #[0]
 prediction = ops.reshape(prediction, [-1])
 prediction = [mapping[i] for i in np.array(prediction)]
 
 # eu -> B-ORG, german -> B-MISC, british -> B-MISC
-print(prediction)
+print(prediction[:len_input])
 
 loss, acc = ner_model.evaluate(val_dataset) #.take(2))
 
