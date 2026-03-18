@@ -30,7 +30,6 @@ def get_data():
     stsb_ds = tfds.load("glue/stsb",)
     stsb_train, stsb_valid = stsb_ds["train"], stsb_ds["validation"]
 
-
     # set drop_remainder=True in batch if using squeeze in RegressionSiamese below. squeeze is removing
     # all dimensions and sending flat (no array) input to backbone which is throwing error.
     stsb_train = (
@@ -48,51 +47,18 @@ def get_data():
         .prefetch(tf.data.AUTOTUNE)
     )
 
-    '''
-    j = 0
-    for i in stsb_train:
-        print (f"i -> {i}")
-        j = j + 1
 
-        if j == 4:
-            break
-    '''
+    #j = 0
+    #for i in stsb_train:
+    #    print (f"i -> {i}")
+    #    j = j + 1
+
+    #    if j == 4:
+    #        break
 
     return stsb_train, stsb_valid
 
-#sys.exit(-1)
 
-@keras.saving.register_keras_serializable()
-class BertEncoder2(keras.Model):
-    def __init__(self, units, **kwargs):
-
-        super().__init__(**kwargs)
-
-        self.preprocessor  = keras_hub.models.BertPreprocessor.from_preset("bert_tiny_en_uncased")
-        self.backbone      = keras_hub.models.BertBackbone.from_preset("bert_tiny_en_uncased")
-        self.pooling_layer = keras.layers.GlobalAveragePooling1D()
-        self.norm_layer    = keras.layers.UnitNormalization(axis=1) # normalization needed to keep cosine similarity within range (0,1)
-        self.units = units
-
-    def call(self, inputs):
-
-        x = self.preprocessor(inputs)
-        h = self.backbone(x)
-        e = self.pooling_layer(h["sequence_output"], x["padding_mask"])
-        e = self.norm_layer(e)
-
-        return e
-
-    # need this only when passing extra argument (eg. units) in __init__()
-    def get_config(self):
-        config = super().get_config()
-        config.update({
-            "units" : self.units,
-        })
-        
-        return config
-
-    
 @keras.saving.register_keras_serializable()
 class BertEncoder(keras.Model):
     def __init__(self, **kwargs):
@@ -114,25 +80,14 @@ class BertEncoder(keras.Model):
 
         return e
 
-    '''
-    def get_config(self):
-        config = super().get_config()
-        config.update({
-            "preprocessor" : self.preprocessor,
-            "backbone" : self.backbone,
-            "pooling_layer" : self.pooling_layer,
-            "norm_layer" : self.norm_layer
-        })
-        
-        return config
-    '''
 
 class RegressionSiamese(keras.Model):
-    def __init__(self, encoder, **kwargs):
+    def __init__(self, encoder1, encoder2, **kwargs):
 
         super().__init__(**kwargs)
 
-        self.encoder = encoder
+        self.encoder1 = encoder1
+        self.encoder2 = encoder2
 
     def call(self, inputs):
 
@@ -140,8 +95,8 @@ class RegressionSiamese(keras.Model):
         sen1, sen2 = inputs # keras.ops.split(inputs, 2, axis=1) -> use keras.ops.split if using array format in preprocess
         #print (f"sen1 -> {tf.squeeze(sen1)}, sen2 -> {sen2}")
 
-        u = self.encoder(sen1) #tf.squeeze(sen1))
-        v = self.encoder(sen2) #tf.squeeze(sen2))
+        u = self.encoder1(sen1) #tf.squeeze(sen1))
+        v = self.encoder2(sen2) #tf.squeeze(sen2))
 
         cosine_similarity_scores = keras.ops.matmul(u, keras.ops.transpose(v))
 
@@ -151,17 +106,10 @@ class RegressionSiamese(keras.Model):
         return self.encoder
 
 
-def test_sample(bert_encoder):
+def test_sample(bert_encoder1, bert_encoder2, sentences, query):
     
-    sentences = [
-        "Today is a very sunny day.",
-        "I am hungry, I will get my meal.",
-        "The dog is eating his food.",
-    ]
-    query = ["The dog is enjoying his meal."]
-
-    sentence_embeddings = bert_encoder(tf.constant(sentences))
-    query_embedding = bert_encoder(tf.constant(query))
+    query_embedding = bert_encoder1(tf.constant(query))
+    sentence_embeddings = bert_encoder2(tf.constant(sentences))
 
     cosine_similarity_scores = tf.matmul(query_embedding, tf.transpose(sentence_embeddings))
     for i, sim in enumerate(cosine_similarity_scores[0]):
@@ -170,16 +118,26 @@ def test_sample(bert_encoder):
 
 
 if __name__ == "__main__":
-
+        
 
     stsb_train, stsb_valid = get_data()
-    
-    bert_encoder = BertEncoder()
-    bert_regression_siamese = RegressionSiamese(bert_encoder)
 
+    bert_encoder1 = BertEncoder()
+    bert_encoder2 = BertEncoder()
+    bert_regression_siamese = RegressionSiamese(bert_encoder1, bert_encoder2)
+
+    sentences = [
+            "Today is a very sunny day.",
+            "I am hungry, I will get my meal.",
+            "The meal cost is high.",
+            "The dog is playing in dirt.",
+            "The furnitures are on sale.",
+            "The dog is eating his food.",
+        ]
+    query = ["The dog is enjoying his meal."]
 
     print ("\nBefore training:")
-    test_sample(bert_encoder)
+    test_sample(bert_encoder1, bert_encoder2, sentences, query)
     print ()
 
     bert_regression_siamese.compile(
@@ -190,10 +148,22 @@ if __name__ == "__main__":
 
     bert_regression_siamese.fit(stsb_train, validation_data=stsb_valid, epochs=EPOCHS)
 
+
+
     print ("\nAfter training:")
-    test_sample(bert_encoder)
+    test_sample(bert_encoder1, bert_encoder2, sentences, query)
     print ()
 
-    bert_encoder.save("sentence_transformer1.keras")
-    bert_encoder2 = BertEncoder2(100)
-    bert_encoder2.save("sentence_transformer2.keras")
+    query = ["Food cost is increasing."]
+    test_sample(bert_encoder1, bert_encoder2, sentences, query)
+    print ()
+
+    query = ["Temperature is high."]
+    test_sample(bert_encoder1, bert_encoder2, sentences, query)
+
+    #test_sample(bert_encoder2, bert_encoder1)
+    #print ()
+
+    bert_encoder1.save("sentence_transformer_query.keras")
+    bert_encoder2.save("sentence_transformer_docs.keras")
+
