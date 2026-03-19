@@ -1,5 +1,5 @@
 # AI/ML Projects
-This repository contains the code for retrival augmented generation (RAG). 
+This repository contains the code for retrieval augmented generation (RAG). 
 
 RAG needs two language model architectures: causal LLM for generation and sentence transformer for retrieval. 
 
