@@ -10,7 +10,7 @@ import tensorflow as tf
 
 import keras, keras_hub
 from keras import layers
-
+#from masked_llm_from_scratch import BertBackbone
 
 # Parameters
 
@@ -91,6 +91,30 @@ vald_data = (
 )
 
 
+class LLM_Text(keras.Model):
+
+    def __init__(self):
+        super().__init__()
+
+        # from library
+        self.tok_and_pos = keras_hub.layers.TokenAndPositionEmbedding(vocabulary_size=tokenizer.vocabulary_size(), sequence_length=SEQ_LENGTH, embedding_dim=MODEL_DIM)
+
+        self.ln  = keras.layers.LayerNormalization(epsilon=NORM_EPSILON)
+        self.drp = keras.layers.Dropout(rate=DROPOUT)
+
+        # from library
+        self.trs_enc = [keras_hub.layers.TransformerEncoder(intermediate_dim=INTERMEDIATE_DIM, num_heads=NUM_HEADS, dropout=DROPOUT, layer_norm_epsilon=NORM_EPSILON) for _ in range(NUM_LAYERS)]
+        
+    def call(self, x):
+
+        x = self.tok_and_pos(x)
+        x = self.drp(self.ln(x))
+
+        for i in range(NUM_LAYERS):
+            x = self.trs_enc[i](x)
+
+        return x
+
 class LLM_Text_Classifier(keras.Model):
 
     def __init__(self, model_llm_text):
@@ -108,9 +132,9 @@ class LLM_Text_Classifier(keras.Model):
         return x
     
 
-# Load from local pre-trained model - Run masked_llm.py before this to build encoder_model.keras
+# Load from local pre-trained model - Run /llm_pretraining/tensorflow/masked_llm.py before this to build encoder_model.keras
 
-model_llm_text = keras.models.load_model("./encoder_model.keras") #, compile=True)
+model_llm_text = keras.models.load_model("./encoder_model.keras") #"./bert_backbone_mlm.keras") #, compile=True) # LLM_Text() #
 model = LLM_Text_Classifier(model_llm_text)
 
 

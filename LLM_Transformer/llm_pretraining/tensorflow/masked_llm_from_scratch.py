@@ -28,6 +28,19 @@ NORM_EPSILON = 1e-5
 
 # data preprocessing
 
+vocab_file = keras.utils.get_file(
+    origin="https://storage.googleapis.com/tensorflow/keras-nlp/examples/bert/bert_vocab_uncased.txt",
+)
+
+tokenizer = keras_hub.tokenizers.WordPieceTokenizer(
+    vocabulary=vocab_file,
+    sequence_length=SEQ_LENGTH,
+    lowercase=True,
+    strip_accents=True,
+    special_tokens=["[MASK]"],
+    special_tokens_in_strings=True
+)
+
 def get_text_list_from_files(files):
     text_list = []
     for name in files:
@@ -50,34 +63,6 @@ def get_data_from_text_files(folder_name):
     )
     df = df.sample(len(df)).reset_index(drop=True)
     return df
-
-
-train_df = get_data_from_text_files("train")
-test_df = get_data_from_text_files("test")
-
-all_data = pd.concat([train_df, test_df], ignore_index=True)
-print (all_data)
-
-vocab_file = keras.utils.get_file(
-    origin="https://storage.googleapis.com/tensorflow/keras-nlp/examples/bert/bert_vocab_uncased.txt",
-)
-
-tokenizer = keras_hub.tokenizers.WordPieceTokenizer(
-    vocabulary=vocab_file,
-    sequence_length=SEQ_LENGTH,
-    lowercase=True,
-    strip_accents=True,
-    special_tokens=["[MASK]"],
-    special_tokens_in_strings=True
-)
-
-# Get mask token id for masked language model
-mask_token_id = tokenizer(["[MASK]"]).numpy()[0][0]
-VOCAB_SIZE = tokenizer.vocabulary_size()
-
-def encode(texts):
-    encoded_texts = tokenizer(texts) #vectorize_layer(texts)
-    return encoded_texts.numpy()
 
 
 def get_masked_input_and_labels(encoded_texts):
@@ -118,36 +103,30 @@ def get_masked_input_and_labels(encoded_texts):
     return encoded_texts_masked, y_labels, sample_weights
 
 
-# We have 25000 examples for training
-x_train = encode(train_df.review.values)  # encode reviews with vectorizer
-y_train = train_df.sentiment.values
-train_classifier_ds = (
-    tf.data.Dataset.from_tensor_slices((x_train, y_train))
-    .shuffle(1000)
-    .batch(BATCH_SIZE)
-)
+# Get mask token id for masked language model
+mask_token_id = tokenizer(["[MASK]"]).numpy()[0][0]
+VOCAB_SIZE = tokenizer.vocabulary_size()
 
-# We have 25000 examples for testing
-x_test = encode(test_df.review.values)
-y_test = test_df.sentiment.values
-test_classifier_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test)).batch(
-    BATCH_SIZE
-)
+def get_data():
 
-# Dataset for end to end model input (will be used at the end)
-test_raw_classifier_ds = test_df
+    train_df = get_data_from_text_files("train")
+    test_df = get_data_from_text_files("test")
 
-# Prepare data for masked language model
-x_all_review = encode(all_data.review.values)
-x_masked_train, y_masked_labels, sample_weights = get_masked_input_and_labels(
-    x_all_review
-)
+    all_data = pd.concat([train_df, test_df], ignore_index=True)
+    print (all_data)
 
+    # Prepare data for masked language model
+    x_all_review = tokenizer(all_data.review.values).numpy()
+    x_masked_train, y_masked_labels, sample_weights = get_masked_input_and_labels(
+        x_all_review
+    )
 
-mlm_ds = tf.data.Dataset.from_tensor_slices(
-    (x_masked_train, y_masked_labels, sample_weights)
-)
-mlm_ds = mlm_ds.shuffle(1000).batch(BATCH_SIZE)
+    mlm_ds = tf.data.Dataset.from_tensor_slices(
+        (x_masked_train, y_masked_labels, sample_weights)
+    )
+    mlm_ds = mlm_ds.shuffle(1000).batch(BATCH_SIZE)
+
+    return mlm_ds
 
 
 
@@ -183,8 +162,8 @@ class TransformerBlock(keras.layers.Layer):
 @keras.saving.register_keras_serializable()    
 class BertBackbone(keras.Model):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
         self.tok_and_pos = keras_hub.layers.TokenAndPositionEmbedding(vocabulary_size=tokenizer.vocabulary_size(), sequence_length=SEQ_LENGTH, embedding_dim=MODEL_DIM)
 
@@ -270,20 +249,24 @@ class MaskedTextGenerator(keras.callbacks.Callback):
             }
             pprint(result)
 
-            
-sample_tokens = tokenizer(["I have watched this [MASK] and it was awesome"])
-generator_callback = MaskedTextGenerator(sample_tokens.numpy())
 
-bert_backbone = BertBackbone()
 
-mlm_model = MaskedLanguageModel(bert_backbone)
-mlm_model.predict(sample_tokens)
-mlm_model.summary()
+if __name__ == "__main__":
+    
+    sample_tokens = tokenizer(["I have watched this [MASK] and it was awesome"])
+    generator_callback = MaskedTextGenerator(sample_tokens.numpy())
 
-optimizer = keras.optimizers.Adam(learning_rate=LEARNING_RATE)
-mlm_model.compile(optimizer=optimizer, loss="sparse_categorical_crossentropy", metrics=["sparse_categorical_accuracy"])
+    bert_backbone = BertBackbone()
 
-mlm_model.fit(mlm_ds, epochs=EPOCHS, callbacks=[generator_callback])
+    mlm_model = MaskedLanguageModel(bert_backbone)
+    mlm_model.predict(sample_tokens)
+    mlm_model.summary()
 
-bert_backbone.save("bert_backbone_mlm.keras")
+    mlm_ds = get_data()
+    
+    optimizer = keras.optimizers.Adam(learning_rate=LEARNING_RATE)
+    mlm_model.compile(optimizer=optimizer, loss="sparse_categorical_crossentropy", metrics=["sparse_categorical_accuracy"])
+    mlm_model.fit(mlm_ds, epochs=EPOCHS, callbacks=[generator_callback])
+
+    bert_backbone.save("bert_backbone_mlm.keras")
 
