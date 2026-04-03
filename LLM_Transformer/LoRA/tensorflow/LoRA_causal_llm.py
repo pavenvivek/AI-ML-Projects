@@ -112,8 +112,6 @@ class LoraLayer(keras.layers.Layer):
     def call(self, inputs):
 
         original_output = self.original_layer(inputs)
-        A_out = self.A(inputs)
-        B_out = self.B(self.A(inputs))
 
         if self.trainable:
             # If we are fine-tuning the model, we will add LoRA layers' output
